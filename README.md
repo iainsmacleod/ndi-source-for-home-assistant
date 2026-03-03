@@ -15,7 +15,7 @@ Show NDI (Network Device Interface) video sources broadcast on your network in H
 2. Click the three dots (⋮) → **Repositories**
 3. Add this repository URL and click **Add**:
    ```
-   https://github.com/YOUR_USERNAME/ndi-source-for-home-assistant
+   https://github.com/iainsmacleod/ndi-source-for-home-assistant
    ```
 4. Install the **NDI Bridge** addon, start it, and ensure it has **host** or appropriate network access for NDI multicast.
 
