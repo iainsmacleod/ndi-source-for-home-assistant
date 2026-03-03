@@ -1,0 +1,4 @@
+# https://developers.home-assistant.io/docs/add-ons/repository#repository-configuration
+name: NDI Source for Home Assistant
+url: "https://github.com/YOUR_USERNAME/ndi-source-for-home-assistant"
+maintainer: Your Name <your.email@example.com>

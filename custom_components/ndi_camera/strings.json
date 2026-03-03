@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "NDI Bridge",
+        "description": "Enter the URL of your NDI Bridge addon (e.g. http://localhost:8080). Ensure the addon is installed and running with host network.",
+        "data": {
+          "bridge_url": "Bridge URL"
+        }
+      },
+      "select_source": {
+        "title": "Select NDI source",
+        "description": "Choose the NDI source to display.",
+        "data": {
+          "source_name": "NDI source",
+          "name": "Camera name"
+        }
+      }
+    },
+    "error": {
+      "cannot_reach_bridge": "Could not reach the NDI Bridge or no sources found. Check the URL and that the addon is running."
+    },
+    "abort": {
+      "already_configured": "This NDI source is already configured."
+    }
+  }
+}

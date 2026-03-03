@@ -1,0 +1,17 @@
+# https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
+name: NDI Bridge
+description: Receives NDI streams and serves them as MJPEG with discovery API for the NDI Camera integration.
+version: "1.0.0"
+slug: ndi_bridge
+arch:
+  - aarch64
+  - amd64
+init: false
+host_network: true
+options:
+  port: 8080
+  source_name: ""
+schema:
+  port: "int(8080)?"
+  source_name: "str?"
+image: "ghcr.io/YOUR_USERNAME/ndi-bridge-{arch}"

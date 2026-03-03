@@ -1,0 +1,6 @@
+{
+  "name": "NDI Source for Home Assistant",
+  "render_readme": true,
+  "content_in_root": false,
+  "filename": "ndi_camera"
+}

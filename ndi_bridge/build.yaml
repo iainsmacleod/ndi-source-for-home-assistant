@@ -1,0 +1,4 @@
+# Multi-arch build; use Python 3.11 Debian-based image for cyndilib (pre-built wheels)
+build_from:
+  aarch64: "python:3.11-slim-bookworm"
+  amd64: "python:3.11-slim-bookworm"
