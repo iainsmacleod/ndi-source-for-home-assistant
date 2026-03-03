@@ -63,7 +63,6 @@ def receiver_loop():
         from cyndilib.receiver import Receiver, ReceiveFrameType
         from cyndilib.wrapper.ndi_recv import RecvColorFormat
         from PIL import Image
-        import numpy as np
     except ImportError as e:
         print(f"Import error in receiver_loop: {e}")
         return
@@ -112,12 +111,18 @@ def receiver_loop():
                 w, h = vf.get_resolution()
                 buf_size = vf.get_buffer_size()
                 if buf_size > 0 and w > 0 and h > 0:
-                    arr = np.zeros(buf_size, dtype=np.uint8)
-                    vf.fill_p_data(arr)
-                    # BGRA -> RGB
-                    bgra = arr.reshape((h, w, 4))
-                    rgb = bgra[:, :, [2, 1, 0]]
-                    img = Image.fromarray(rgb)
+                    raw = bytearray(buf_size)
+                    vf.fill_p_data(memoryview(raw))
+                    # Convert raw BGRA bytes to RGB JPEG without numpy.
+                    img = Image.frombuffer(
+                        "RGBA",
+                        (w, h),
+                        bytes(raw),
+                        "raw",
+                        "BGRA",
+                        0,
+                        1,
+                    ).convert("RGB")
                     buf = io.BytesIO()
                     img.save(buf, format="JPEG", quality=85)
                     jpeg = buf.getvalue()
