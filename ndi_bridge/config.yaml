@@ -14,4 +14,4 @@ options:
 schema:
   port: "int(8080)?"
   source_name: "str?"
-image: "ghcr.io/YOUR_USERNAME/ndi-bridge-{arch}"
+image: "ghcr.io/iainsmacleod/ndi-bridge-{arch}"

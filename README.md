@@ -4,35 +4,44 @@ Show NDI (Network Device Interface) video sources broadcast on your network in H
 
 ## Components
 
-- **Addon (NDI Bridge)**: Receives NDI streams and serves them as MJPEG with an API for source discovery. Install via the addon repository.
-- **Integration (NDI Camera)**: Discovers NDI sources and creates camera entities. Install via HACS.
+- **Addon (NDI Bridge)**: Receives NDI streams and serves them as MJPEG with an API for source discovery.
+- **Integration (NDI Camera)**: Discovers NDI sources and creates camera entities. Both are installed via HACS.
 
 ## Installation
 
-### 1. Add the addon repository
+### 1. Add the repo in HACS and install the NDI Bridge addon
 
-1. In Home Assistant: **Settings** → **Add-ons** → **Add-on store**
-2. Click the three dots (⋮) → **Repositories**
-3. Add this repository URL and click **Add**:
+1. Open **HACS** → **Add-ons** → **+** (Custom repositories)
+2. Add this repository URL and choose category **Add-on**, then **Add**:
    ```
    https://github.com/iainsmacleod/ndi-source-for-home-assistant
    ```
-4. Install the **NDI Bridge** addon, start it, and ensure it has **host** or appropriate network access for NDI multicast.
+3. Find **NDI Bridge** in the list and install it
+4. Start the addon and ensure it has host network access (needed for NDI discovery)
 
-### 2. Install the integration via HACS
+### 2. Install the NDI Camera integration (same repo)
 
-1. Open **HACS** → **Integrations**
-2. Click **+** (Explore & Download Repositories)
-3. Search for **NDI Source** or add this repo as a custom repository (category: **Integration**)
-4. Install **NDI Camera**
-5. Restart Home Assistant
+1. In HACS go to **Integrations** → **+** (Custom repositories) and add the same repo URL with category **Integration**
+2. Search for **NDI Camera** and install it
+3. Restart Home Assistant when prompted
 
-### 3. Configure
+### 3. Add the integration and configure
 
 1. **Settings** → **Devices & services** → **Add integration**
 2. Search for **NDI Camera**
-3. Follow the config flow: the integration will use the addon to discover NDI sources; pick one and name your camera
-4. Add a **Picture** or **Camera** card to a dashboard and select the NDI camera entity
+3. When asked for **Bridge URL**, enter the URL where the NDI Bridge addon is reachable (see below)
+4. Pick an NDI source and name your camera
+5. Add a **Picture** or **Camera** card to a dashboard and select the NDI camera entity
+
+## Bridge URL (configuration value)
+
+The **Bridge URL** is the address of your NDI Bridge addon’s API and stream.
+
+- **Same machine as Home Assistant**: use **`http://localhost:8080`** (or `http://127.0.0.1:8080`). The addon listens on port 8080 by default.
+- **Home Assistant OS / Supervised (addon on host)**: if the integration cannot reach `localhost`, use the IP of your Home Assistant host, e.g. **`http://192.168.1.100:8080`** (replace with your HA host’s IP). You can see this in **Settings** → **System** → **Network**.
+- If you changed the addon’s port in its options, use that port instead of 8080.
+
+So in most cases set **Bridge URL** to **`http://localhost:8080`**.
 
 ## Requirements
 
