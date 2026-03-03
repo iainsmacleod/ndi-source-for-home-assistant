@@ -1,4 +1,4 @@
-# Multi-arch build; use Python 3.11 Debian-based image for cyndilib (pre-built wheels)
+# Multi-arch build; use Home Assistant base-python images
 build_from:
-  aarch64: "python:3.11-slim-bookworm"
-  amd64: "python:3.11-slim-bookworm"
+  aarch64: "ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.21"
+  amd64: "ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.21"
