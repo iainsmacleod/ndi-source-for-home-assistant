@@ -3,6 +3,7 @@ name: NDI Bridge
 description: Receives NDI streams and serves them as MJPEG with discovery API for the NDI Camera integration.
 version: "1.0.0"
 slug: ndi_bridge
+url: "https://github.com/iainsmacleod/ndi-source-for-home-assistant/tree/main/ndi_bridge"
 arch:
   - aarch64
   - amd64

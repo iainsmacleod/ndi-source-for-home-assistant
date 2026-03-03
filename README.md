@@ -4,26 +4,34 @@ Show NDI (Network Device Interface) video sources broadcast on your network in H
 
 ## Components
 
-- **Addon (NDI Bridge)**: Receives NDI streams and serves them as MJPEG with an API for source discovery.
-- **Integration (NDI Camera)**: Discovers NDI sources and creates camera entities. Both are installed via HACS.
+- **Addon (NDI Bridge)**: Receives NDI streams and serves them as MJPEG with an API for source discovery. Installed from the **Add-on store**.
+- **Integration (NDI Camera)**: Discovers NDI sources and creates camera entities. Installed via **HACS**.
+
+HACS does not install add-ons; add-ons are installed from the Add-on store.
 
 ## Installation
 
-### 1. Add the repo in HACS and install the NDI Bridge addon
+### 1. Install the NDI Bridge addon (Add-on store)
 
-1. Open **HACS** → **Add-ons** → **+** (Custom repositories)
-2. Add this repository URL and choose category **Add-on**, then **Add**:
+1. Go to **Settings** → **Add-ons** → **Add-on store**
+2. Click the **three dots (⋮)** in the top right → **Repositories**
+3. Paste this URL and click **Add**, then **Close**:
    ```
    https://github.com/iainsmacleod/ndi-source-for-home-assistant
    ```
-3. Find **NDI Bridge** in the list and install it
-4. Start the addon and ensure it has host network access (needed for NDI discovery)
+4. Back in the Add-on store, **scroll down**. Custom repos often appear as their own section (e.g. **"NDI Source for Home Assistant"** or the maintainer name). Click that section to see **NDI Bridge**, then install it.
+5. If you don’t see it: try the **Refresh** button (if any) in the Add-on store, or restart Home Assistant and open the Add-on store again.
+6. Start the addon and turn **Host network** on (needed for NDI discovery)
 
-### 2. Install the NDI Camera integration (same repo)
+### 2. Install the NDI Camera integration (HACS)
 
-1. In HACS go to **Integrations** → **+** (Custom repositories) and add the same repo URL with category **Integration**
-2. Search for **NDI Camera** and install it
-3. Restart Home Assistant when prompted
+1. Open **HACS** → **Integrations** → three dots (⋮) → **Custom repositories**
+2. Add this repository URL and choose category **Integration**, then **Add**:
+   ```
+   https://github.com/iainsmacleod/ndi-source-for-home-assistant
+   ```
+3. Search for **NDI Camera** and install it
+4. Restart Home Assistant when prompted
 
 ### 3. Add the integration and configure
 
