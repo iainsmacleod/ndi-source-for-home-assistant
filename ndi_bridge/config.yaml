@@ -11,6 +11,7 @@ init: false
 startup: services
 boot: auto
 host_network: true
+host_dbus: true
 options:
   port: 8080
   source_name: ""
