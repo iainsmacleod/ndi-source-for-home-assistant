@@ -18,18 +18,42 @@ OPTIONS_PATH = "/data/options.json"
 
 
 def load_options() -> dict:
-    out = {"port": 8080, "source_name": ""}
+    out = {"port": 8080, "source_name": "", "discovery_server": ""}
     out["port"] = int(os.environ.get("NDI_BRIDGE_PORT", "8080"))
     out["source_name"] = os.environ.get("NDI_BRIDGE_SOURCE_NAME", "")
+    out["discovery_server"] = os.environ.get("NDI_BRIDGE_DISCOVERY_SERVER", "")
     if os.path.isfile(OPTIONS_PATH):
         try:
             with open(OPTIONS_PATH) as f:
                 data = json.load(f)
                 out["port"] = int(data.get("port", out["port"]))
                 out["source_name"] = data.get("source_name", out["source_name"])
+                out["discovery_server"] = data.get("discovery_server", out["discovery_server"])
         except Exception:
             pass
     return out
+
+
+def _configure_ndi_discovery_server(server_ip: str):
+    """Write NDI SDK config file to use a Discovery Server instead of mDNS."""
+    if not server_ip:
+        return
+    config = {
+        "ndi": {
+            "groups": {"recv": "", "send": ""},
+            "multicast": {"send": {"enable": False}},
+            "networks": {
+                "discovery": server_ip,
+                "ips": ""
+            }
+        }
+    }
+    config_dir = os.path.expanduser("~/.ndi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "ndi-config.v1.json")
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    _log(f"NDI Discovery Server configured: {server_ip} → {config_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -367,8 +391,12 @@ def main():
     global current_source_name
     current_source_name = options["source_name"] or None
 
-    # Ensure avahi is running (needed for NDI mDNS discovery)
-    _ensure_avahi()
+    # Configure NDI Discovery Server if provided (bypasses mDNS)
+    if options.get("discovery_server"):
+        _configure_ndi_discovery_server(options["discovery_server"])
+    else:
+        # Fall back to Avahi/mDNS
+        _ensure_avahi()
 
     # Start the Finder in background
     threading.Thread(target=_get_finder, daemon=True).start()

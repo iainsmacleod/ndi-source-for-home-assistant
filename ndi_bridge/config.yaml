@@ -15,7 +15,9 @@ host_dbus: true
 options:
   port: 8080
   source_name: ""
+  discovery_server: ""
 schema:
   port: "int?"
   source_name: "str?"
+  discovery_server: "str?"
 # image: "ghcr.io/iainsmacleod/ndi-bridge-{arch}"
