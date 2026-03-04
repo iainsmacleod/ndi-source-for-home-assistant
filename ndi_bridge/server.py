@@ -35,25 +35,36 @@ def load_options() -> dict:
 
 
 def _configure_ndi_discovery_server(server_ip: str):
-    """Write NDI SDK config file to use a Discovery Server instead of mDNS."""
+    """Write NDI SDK config file to use a Discovery Server instead of mDNS.
+
+    NDI docs: config at $HOME/.ndi/ndi-config.v1.json (Linux). The "networks"
+    object must have "ips" and "discovery" (comma-delimited list of Discovery
+    Server IPs). See docs.ndi.video Configuration Files and Discovery Server.
+    """
     if not server_ip:
         return
+    # Strip whitespace; support comma-delimited list per NDI 5+
+    discovery_ips = ",".join(s.strip() for s in server_ip.split(",") if s.strip())
+    if not discovery_ips:
+        return
+    # Minimal config per official docs: ndi.networks.discovery + ndi.networks.ips
     config = {
         "ndi": {
-            "groups": {"recv": "", "send": ""},
-            "multicast": {"send": {"enable": False}},
             "networks": {
-                "discovery": server_ip,
-                "ips": ""
+                "ips": "",
+                "discovery": discovery_ips,
             }
         }
     }
-    config_dir = os.path.expanduser("~/.ndi")
+    # Linux: SDK loads from $HOME/.ndi/ndi-config.v1.json, or NDI_CONFIG_DIR if set
+    config_dir = "/root/.ndi"
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "ndi-config.v1.json")
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
-    _log(f"NDI Discovery Server configured: {server_ip} → {config_path}")
+    os.environ["HOME"] = "/root"
+    os.environ["NDI_CONFIG_DIR"] = config_dir  # SDK loads ndi-config.v1.json from this dir
+    _log(f"NDI Discovery Server configured: {discovery_ips} → {config_path}")
 
 
 # ---------------------------------------------------------------------------
