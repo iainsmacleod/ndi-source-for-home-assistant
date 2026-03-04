@@ -8,6 +8,8 @@ arch:
   - aarch64
   - amd64
 init: false
+startup: services
+boot: auto
 host_network: true
 options:
   port: 8080

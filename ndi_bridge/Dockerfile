@@ -5,6 +5,9 @@ FROM $BUILD_FROM
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libavahi-client3 \
+    avahi-utils \
+    avahi-daemon \
+    dbus \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \

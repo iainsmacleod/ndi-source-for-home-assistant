@@ -1,11 +1,13 @@
 """
-NDI Bridge: HTTP server that discovers NDI sources and streams selected source as MJPEG.
-API: GET /sources, POST /source, GET /stream.mjpg, GET /snapshot.jpg, GET /health
+NDI Bridge: discovers NDI sources and streams selected one as MJPEG.
+API: GET /sources, GET /scan, POST /source, GET /source, GET /stream.mjpg,
+     GET /snapshot.jpg, GET /health
 """
 import asyncio
 import io
 import json
 import os
+import subprocess
 import threading
 import time
 from typing import Optional
@@ -41,28 +43,96 @@ latest_jpeg_lock = threading.Lock()
 
 mjpeg_subscribers: list = []
 
-# Single persistent Finder shared by discovery + receiver
 _finder = None
 _finder_lock = threading.Lock()
-_finder_ready = threading.Event()
+
+_discovery_log: list = []   # circular log of discovery events
+_MAX_LOG = 50
+
+
+def _log(msg: str):
+    ts = time.strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    _discovery_log.append(line)
+    if len(_discovery_log) > _MAX_LOG:
+        _discovery_log.pop(0)
+
+
+# ---------------------------------------------------------------------------
+# Avahi helper — start or verify avahi-daemon is running
+# ---------------------------------------------------------------------------
+
+def _ensure_avahi():
+    """Try to start avahi-daemon if it's not running (best-effort)."""
+    try:
+        result = subprocess.run(
+            ["avahi-daemon", "--check"],
+            capture_output=True, timeout=3
+        )
+        if result.returncode == 0:
+            _log("avahi-daemon: already running")
+            return
+    except FileNotFoundError:
+        _log("WARNING: avahi-daemon not installed — NDI discovery may not work")
+        return
+    except Exception as e:
+        _log(f"avahi check error: {e}")
+
+    try:
+        _log("Starting avahi-daemon...")
+        subprocess.Popen(
+            ["avahi-daemon", "--no-drop-root", "--daemonize"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        time.sleep(2)
+        _log("avahi-daemon started")
+    except Exception as e:
+        _log(f"Could not start avahi-daemon: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Finder management
+# ---------------------------------------------------------------------------
+
+def _make_finder():
+    """Create, open, and return a new Finder. Caller holds _finder_lock."""
+    try:
+        from cyndilib.finder import Finder
+        f = Finder()
+        f.open()
+        _log("Finder opened — waiting 10s for initial discovery...")
+        time.sleep(10)
+        names = list(f.get_source_names())
+        _log(f"Initial discovery complete: {names if names else 'no sources found'}")
+        return f
+    except Exception as e:
+        _log(f"Finder init error: {e}")
+        return None
 
 
 def _get_finder():
-    """Return the global Finder, creating and opening it if needed."""
+    """Return the global Finder, creating it if needed."""
     global _finder
     with _finder_lock:
         if _finder is None:
-            try:
-                from cyndilib.finder import Finder
-                _finder = Finder()
-                _finder.open()
-                # Wait a few seconds for initial discovery
-                time.sleep(5)
-                _finder_ready.set()
-            except Exception as e:
-                print(f"Finder init error: {e}")
-                _finder = None
+            _finder = _make_finder()
         return _finder
+
+
+def _reset_finder():
+    """Destroy and recreate the Finder (for forced rescan)."""
+    global _finder
+    with _finder_lock:
+        if _finder is not None:
+            try:
+                _finder.close()
+            except Exception:
+                pass
+            _finder = None
+        _log("Finder reset — starting fresh discovery...")
+        _finder = _make_finder()
+        return list(_finder.get_source_names()) if _finder else []
 
 
 def get_sources_sync() -> list[str]:
@@ -71,10 +141,18 @@ def get_sources_sync() -> list[str]:
         finder = _get_finder()
         if finder is None:
             return []
-        return list(finder.get_source_names())
+        names = list(finder.get_source_names())
+        _log(f"get_sources called — found: {names if names else '[]'}")
+        return names
     except Exception as e:
-        print(f"Discovery error: {e}")
+        _log(f"Discovery error: {e}")
         return []
+
+
+def scan_sources_sync() -> list[str]:
+    """Force a fresh Finder cycle and return discovered sources."""
+    _log("Forced rescan requested")
+    return _reset_finder()
 
 
 # ---------------------------------------------------------------------------
@@ -82,20 +160,18 @@ def get_sources_sync() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def receiver_loop():
-    """Background thread: receive NDI frames, convert to JPEG, push to subscribers."""
     global latest_jpeg
     try:
         from cyndilib.receiver import Receiver, ReceiveFrameType
         from PIL import Image
     except ImportError as e:
-        print(f"Import error in receiver_loop: {e}")
+        _log(f"Import error in receiver_loop: {e}")
         return
-
-    # Wait for the finder to be ready before we start trying to connect
-    _finder_ready.wait(timeout=15)
 
     recv: Optional[Receiver] = None
     connected_to: Optional[str] = None
+
+    _log("Receiver loop started")
 
     while True:
         with current_source_lock:
@@ -112,8 +188,6 @@ def receiver_loop():
             time.sleep(0.5)
             continue
 
-        finder = _get_finder()
-
         if recv is None or connected_to != src_name:
             if recv is not None:
                 try:
@@ -123,23 +197,23 @@ def receiver_loop():
                 recv = None
                 connected_to = None
 
-            if finder is None:
-                time.sleep(1)
-                continue
-
-            src = finder.get_source(src_name)
-            if src is None:
-                time.sleep(1)
-                continue
+            # First try via Finder (has Source object = better reconnection)
+            finder = _get_finder()
+            src_obj = finder.get_source(src_name) if finder else None
 
             try:
-                recv = Receiver(source=src)
+                if src_obj is not None:
+                    recv = Receiver(source=src_obj)
+                    _log(f"Receiver connected via Finder: {src_name!r}")
+                else:
+                    # Fallback: connect by name string directly
+                    recv = Receiver(source_name=src_name)
+                    _log(f"Receiver connecting by name (no Finder match): {src_name!r}")
                 connected_to = src_name
-                print(f"Receiver connected to: {src_name}")
             except Exception as e:
-                print(f"Receiver create error: {e}")
+                _log(f"Receiver create error: {e}")
                 recv = None
-                time.sleep(1)
+                time.sleep(2)
                 continue
 
         try:
@@ -166,7 +240,7 @@ def receiver_loop():
                             except Exception:
                                 pass
         except Exception as e:
-            print(f"Frame error: {e}")
+            _log(f"Frame error: {e}")
             time.sleep(0.1)
 
 
@@ -179,6 +253,13 @@ async def handle_sources(_request: web.Request) -> web.Response:
     loop = asyncio.get_event_loop()
     names = await loop.run_in_executor(None, get_sources_sync)
     return web.json_response({"sources": names})
+
+
+async def handle_scan(_request: web.Request) -> web.Response:
+    """GET /scan — force fresh discovery and return sources after 10s wait."""
+    loop = asyncio.get_event_loop()
+    names = await loop.run_in_executor(None, scan_sources_sync)
+    return web.json_response({"sources": names, "scanned": True})
 
 
 async def handle_get_source(_request: web.Request) -> web.Response:
@@ -198,7 +279,7 @@ async def handle_set_source(request: web.Request) -> web.Response:
         name = ""
     with current_source_lock:
         current_source_name = name if name else None
-    print(f"Source set to: {current_source_name!r}")
+    _log(f"Source set to: {current_source_name!r}")
     return web.json_response({"source_name": current_source_name or ""})
 
 
@@ -259,15 +340,19 @@ async def _write_mjpeg_frame(response: web.StreamResponse, jpeg: bytes) -> None:
 
 
 async def handle_health(_request: web.Request) -> web.Response:
-    """GET /health — liveness."""
+    """GET /health — liveness + diagnostic info."""
     with current_source_lock:
         src = current_source_name or ""
     with latest_jpeg_lock:
         has_frame = latest_jpeg is not None
+    finder = _finder  # non-locking read for status
     return web.json_response({
         "status": "ok",
         "source": src,
         "streaming": has_frame,
+        "finder_open": finder is not None and getattr(finder, "is_open", False),
+        "num_sources": finder.num_sources if finder else 0,
+        "log": _discovery_log[-10:],
     })
 
 
@@ -282,7 +367,10 @@ def main():
     global current_source_name
     current_source_name = options["source_name"] or None
 
-    # Start the persistent finder in background so it's ready fast
+    # Ensure avahi is running (needed for NDI mDNS discovery)
+    _ensure_avahi()
+
+    # Start the Finder in background
     threading.Thread(target=_get_finder, daemon=True).start()
 
     # Start receiver loop
@@ -290,13 +378,14 @@ def main():
 
     app = web.Application()
     app.router.add_get("/sources", handle_sources)
+    app.router.add_get("/scan", handle_scan)
     app.router.add_get("/source", handle_get_source)
     app.router.add_post("/source", handle_set_source)
     app.router.add_get("/stream.mjpg", handle_stream_mjpeg)
     app.router.add_get("/snapshot.jpg", handle_snapshot)
     app.router.add_get("/health", handle_health)
 
-    print(f"NDI Bridge listening on 0.0.0.0:{port}")
+    _log(f"NDI Bridge listening on 0.0.0.0:{port}")
     web.run_app(app, host="0.0.0.0", port=port)
 
 
