@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "NDI Bridge",
-        "description": "Enter the URL of your NDI Bridge addon (e.g. http://localhost:8080). Ensure the addon is installed and running with host network.",
+        "description": "Enter the URL of your NDI Bridge addon. On HAOS the bridge is typically reachable at the HA host IP, e.g. http://192.168.1.x:8080.",
         "data": {
           "bridge_url": "Bridge URL"
         }
@@ -13,12 +13,21 @@
         "description": "Choose the NDI source to display.",
         "data": {
           "source_name": "NDI source",
-          "name": "Camera name"
+          "camera_name": "Camera name"
+        }
+      },
+      "manual_source": {
+        "title": "Enter NDI source name",
+        "description": "No NDI sources were discovered automatically. Check multicast/mDNS networking, or enter the source name manually (format: 'HOSTNAME (SOURCE NAME)'). {hint}",
+        "data": {
+          "source_name": "NDI source name",
+          "camera_name": "Camera name"
         }
       }
     },
     "error": {
-      "cannot_reach_bridge": "Could not reach the NDI Bridge or no sources found. Check the URL and that the addon is running."
+      "cannot_reach_bridge": "Could not reach the NDI Bridge. Check the URL and that the addon is running.",
+      "source_name_required": "Source name cannot be empty."
     },
     "abort": {
       "already_configured": "This NDI source is already configured."

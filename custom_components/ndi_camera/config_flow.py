@@ -8,36 +8,47 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONF_BRIDGE_URL, CONF_SOURCE_NAME, DEFAULT_BRIDGE_URL, DOMAIN
+from .const import (
+    CONF_BRIDGE_URL,
+    CONF_CAMERA_NAME,
+    CONF_SOURCE_NAME,
+    DEFAULT_BRIDGE_URL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def fetch_sources(bridge_url: str) -> list[str]:
-    """Fetch NDI source names from the bridge. Returns empty list on error."""
+async def _check_bridge(bridge_url: str) -> tuple[bool, list[str]]:
+    """
+    Returns (reachable, sources).
+    reachable=False means cannot connect at all.
+    reachable=True, sources=[] means connected but no NDI sources found yet.
+    """
     url = f"{bridge_url.rstrip('/')}/sources"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
-                    return []
+                    return False, []
                 data = await resp.json()
-                return list(data.get("sources", []))
+                return True, list(data.get("sources", []))
     except Exception as e:
         _LOGGER.warning("Failed to fetch NDI sources from %s: %s", url, e)
-        return []
+        return False, []
 
 
 async def set_bridge_source(bridge_url: str, source_name: str) -> bool:
-    """Tell the bridge to stream the given source."""
+    """Tell the bridge which NDI source to stream."""
     url = f"{bridge_url.rstrip('/')}/source"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                url, json={"source_name": source_name}, timeout=aiohttp.ClientTimeout(total=5)
+                url,
+                json={"source_name": source_name},
+                timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 return resp.status == 200
     except Exception as e:
@@ -57,73 +68,98 @@ class NdiCameraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step: bridge URL then source selection."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(
-                            CONF_BRIDGE_URL, default=DEFAULT_BRIDGE_URL
-                        ): str,
-                    }
-                ),
-                description_placeholders={
-                    "bridge_help": "URL of the NDI Bridge addon (e.g. http://localhost:8080). "
-                    "Ensure the addon is installed and running with host network.",
-                },
-            )
+        """Step 1: enter Bridge URL."""
+        errors: dict[str, str] = {}
 
-        self._bridge_url = user_input[CONF_BRIDGE_URL].strip().rstrip("/")
-        if not self._bridge_url.startswith(("http://", "https://")):
-            self._bridge_url = f"http://{self._bridge_url}"
+        if user_input is not None:
+            url = user_input[CONF_BRIDGE_URL].strip().rstrip("/")
+            if not url.startswith(("http://", "https://")):
+                url = f"http://{url}"
+            self._bridge_url = url
 
-        sources = await fetch_sources(self._bridge_url)
-        if not sources:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(
-                            CONF_BRIDGE_URL, default=self._bridge_url
-                        ): str,
-                    }
-                ),
-                errors={"base": "cannot_reach_bridge"},
-                description_placeholders={"bridge_help": ""},
-            )
+            reachable, sources = await _check_bridge(self._bridge_url)
 
-        self._sources = sources
-        return await self.async_step_select_source()
+            if not reachable:
+                errors["base"] = "cannot_reach_bridge"
+            elif not sources:
+                # Bridge is up but discovery is empty — let user proceed with manual entry
+                return await self.async_step_manual_source()
+            else:
+                self._sources = sources
+                return await self.async_step_select_source()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_BRIDGE_URL, default=DEFAULT_BRIDGE_URL): str}
+            ),
+            errors=errors,
+        )
 
     async def async_step_select_source(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Let user select an NDI source and optional name."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="select_source",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(CONF_SOURCE_NAME): vol.In(self._sources),
-                        vol.Optional(CONF_NAME, default="NDI Camera"): str,
-                    }
-                ),
+        """Step 2a: pick from discovered NDI sources."""
+        if user_input is not None:
+            return await self._finish(
+                user_input[CONF_SOURCE_NAME],
+                user_input.get(CONF_CAMERA_NAME, "") or user_input[CONF_SOURCE_NAME],
             )
 
-        source_name = user_input[CONF_SOURCE_NAME]
-        friendly_name = user_input.get(CONF_NAME, "NDI Camera") or "NDI Camera"
+        return self.async_show_form(
+            step_id="select_source",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SOURCE_NAME): vol.In(self._sources),
+                    vol.Optional(CONF_CAMERA_NAME, default="NDI Camera"): str,
+                }
+            ),
+        )
 
+    async def async_step_manual_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 2b: no sources discovered — let user type source name manually."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            source_name = user_input.get(CONF_SOURCE_NAME, "").strip()
+            if not source_name:
+                errors[CONF_SOURCE_NAME] = "source_name_required"
+            else:
+                return await self._finish(
+                    source_name,
+                    user_input.get(CONF_CAMERA_NAME, "") or source_name,
+                )
+
+        return self.async_show_form(
+            step_id="manual_source",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SOURCE_NAME, default=""): str,
+                    vol.Optional(CONF_CAMERA_NAME, default="NDI Camera"): str,
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "hint": "No NDI sources were discovered. "
+                "Check multicast/mDNS networking, or enter the source name manually "
+                "(format: 'HOSTNAME (SOURCE NAME)')."
+            },
+        )
+
+    async def _finish(self, source_name: str, camera_name: str) -> FlowResult:
+        """Create the config entry."""
         await set_bridge_source(self._bridge_url, source_name)
 
         await self.async_set_unique_id(f"{self._bridge_url}#{source_name}")
         self._abort_if_unique_id_configured()
 
         return self.async_create_entry(
-            title=friendly_name,
+            title=camera_name,
             data={
                 CONF_BRIDGE_URL: self._bridge_url,
                 CONF_SOURCE_NAME: source_name,
-                CONF_NAME: friendly_name,
+                CONF_CAMERA_NAME: camera_name,
             },
         )
