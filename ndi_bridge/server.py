@@ -220,6 +220,8 @@ def receiver_loop():
     recv: Optional[Receiver] = None
     connected_to: Optional[str] = None
     first_frame_logged = False
+    last_wait_log = 0.0
+    logged_invalid_frame = False
 
     _log("Receiver loop started")
 
@@ -248,6 +250,8 @@ def receiver_loop():
                 recv = None
                 connected_to = None
                 first_frame_logged = False
+                last_wait_log = 0.0
+                logged_invalid_frame = False
 
             # First try via Finder (has Source object = better reconnection)
             finder = _get_finder()
@@ -269,6 +273,10 @@ def receiver_loop():
                 continue
 
         try:
+            if not first_frame_logged and (time.time() - last_wait_log) >= 15.0:
+                last_wait_log = time.time()
+                _log("Waiting for first video frame from receiver (source may not be sending yet)")
+
             result = recv.receive(ReceiveFrameType.recv_video, timeout_ms=3000)
             if result & ReceiveFrameType.recv_video:
                 vf = recv.video_frame
@@ -294,6 +302,12 @@ def receiver_loop():
                                 q.put_nowait(jpeg)
                             except Exception:
                                 pass
+                    elif not logged_invalid_frame:
+                        logged_invalid_frame = True
+                        _log(f"receive() returned video but frame invalid: w={w} h={h} buf_size={buf_size}")
+                elif not logged_invalid_frame:
+                    logged_invalid_frame = True
+                    _log("receive() returned video flag but video_frame is None")
         except Exception as e:
             _log(f"Frame error: {e}")
             time.sleep(0.1)
