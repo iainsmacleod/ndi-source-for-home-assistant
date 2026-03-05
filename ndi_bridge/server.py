@@ -66,9 +66,12 @@ def _configure_ndi_discovery_server(server_ip: str):
     except OSError as e:
         _log(f"Failed to write NDI config to {config_dir}: {e}")
         return
+    if not os.path.isfile(config_path):
+        _log(f"Config file missing after write: {config_path}")
+        return
     os.environ["HOME"] = "/root"
     os.environ["NDI_CONFIG_DIR"] = config_dir  # SDK loads ndi-config.v1.json from this dir
-    _log(f"NDI Discovery Server configured: {discovery_ips} → {config_path}")
+    _log(f"NDI Discovery Server configured: {discovery_ips} → {config_path} (file ok)")
 
 
 # ---------------------------------------------------------------------------
