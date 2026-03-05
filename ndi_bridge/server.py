@@ -136,8 +136,8 @@ def _make_finder():
         from cyndilib.finder import Finder
         f = Finder()
         f.open()
-        _log("Finder opened — waiting 10s for initial discovery...")
-        time.sleep(10)
+        _log("Finder opened — waiting 3s for initial discovery...")
+        time.sleep(3)  # short wait so /sources and ingress don't hit 504
         names = list(f.get_source_names())
         _log(f"Initial discovery complete: {names if names else 'no sources found'}")
         return f
@@ -291,7 +291,7 @@ async def handle_sources(_request: web.Request) -> web.Response:
 
 
 async def handle_scan(_request: web.Request) -> web.Response:
-    """GET /scan — force fresh discovery and return sources after 10s wait."""
+    """GET /scan — force fresh discovery and return sources after 3s wait."""
     loop = asyncio.get_event_loop()
     names = await loop.run_in_executor(None, scan_sources_sync)
     return web.json_response({"sources": names, "scanned": True})
