@@ -17,7 +17,8 @@ from .const import CONF_BRIDGE_URL, CONF_CAMERA_NAME, CONF_SOURCE_NAME, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 # Time for bridge to switch source and receive first frame before taking snapshot
-_SOURCE_SWITCH_DELAY = 2.0
+_SOURCE_SWITCH_DELAY = 3.0
+_MIN_JPEG_BYTES = 100
 
 
 async def async_setup_entry(
@@ -62,11 +63,24 @@ class NdiCameraEntity(Camera):
             async with session.post(
                 url,
                 json={"source_name": self._source_name},
-                timeout=aiohttp.ClientTimeout(total=5),
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
-                return resp.status == 200
+                ok = resp.status == 200
+                if not ok:
+                    _LOGGER.warning(
+                        "NDI Camera %s: set source failed %s from %s",
+                        self._attr_name,
+                        resp.status,
+                        self._bridge_url,
+                    )
+                return ok
         except Exception as e:
-            _LOGGER.debug("Set bridge source failed: %s", e)
+            _LOGGER.warning(
+                "NDI Camera %s: cannot reach bridge at %s: %s",
+                self._attr_name,
+                self._bridge_url,
+                e,
+            )
             return False
 
     async def async_camera_image(
@@ -75,26 +89,52 @@ class NdiCameraEntity(Camera):
         height: int | None = None,
     ) -> bytes | None:
         """Return the latest JPEG snapshot from the bridge."""
-        # Bridge only streams one source; switch to this camera's source first
-        await self._set_bridge_source()
+        if not await self._set_bridge_source():
+            return None
         await asyncio.sleep(_SOURCE_SWITCH_DELAY)
 
         url = f"{self._bridge_url}/snapshot.jpg"
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 session = async_get_clientsession(self.hass)
                 async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=10)
+                    url, timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
                     if resp.status == 200:
-                        return await resp.read()
-                    if resp.status == 503 and attempt == 0:
-                        await asyncio.sleep(_SOURCE_SWITCH_DELAY)
-                        continue
-                    if resp.status != 200:
-                        _LOGGER.debug("Snapshot returned %s from %s", resp.status, url)
+                        data = await resp.read()
+                        if len(data) >= _MIN_JPEG_BYTES and data[:2] == b"\xff\xd8":
+                            return data
+                        _LOGGER.warning(
+                            "NDI Camera %s: snapshot invalid (size=%s, not JPEG)",
+                            self._attr_name,
+                            len(data),
+                        )
+                    elif resp.status == 503:
+                        if attempt < 2:
+                            _LOGGER.debug(
+                                "NDI Camera %s: no frame yet (503), retry in %ss",
+                                self._attr_name,
+                                _SOURCE_SWITCH_DELAY,
+                            )
+                            await asyncio.sleep(_SOURCE_SWITCH_DELAY)
+                            continue
+                        _LOGGER.warning(
+                            "NDI Camera %s: bridge has no frame (503). Is the NDI source sending?",
+                            self._attr_name,
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "NDI Camera %s: snapshot %s from %s",
+                            self._attr_name,
+                            resp.status,
+                            url,
+                        )
             except Exception as e:
-                _LOGGER.debug("Snapshot fetch error from %s: %s", url, e)
+                _LOGGER.warning(
+                    "NDI Camera %s: snapshot fetch error: %s",
+                    self._attr_name,
+                    e,
+                )
             break
         return None
 
