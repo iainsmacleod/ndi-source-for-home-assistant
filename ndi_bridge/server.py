@@ -219,6 +219,7 @@ def receiver_loop():
 
     recv: Optional[Receiver] = None
     connected_to: Optional[str] = None
+    first_frame_logged = False
 
     _log("Receiver loop started")
 
@@ -234,6 +235,7 @@ def receiver_loop():
                     pass
                 recv = None
                 connected_to = None
+                first_frame_logged = False
             time.sleep(0.5)
             continue
 
@@ -245,6 +247,7 @@ def receiver_loop():
                     pass
                 recv = None
                 connected_to = None
+                first_frame_logged = False
 
             # First try via Finder (has Source object = better reconnection)
             finder = _get_finder()
@@ -266,7 +269,7 @@ def receiver_loop():
                 continue
 
         try:
-            result = recv.receive(ReceiveFrameType.recv_video, timeout_ms=1000)
+            result = recv.receive(ReceiveFrameType.recv_video, timeout_ms=3000)
             if result & ReceiveFrameType.recv_video:
                 vf = recv.video_frame
                 if vf is not None:
@@ -283,6 +286,9 @@ def receiver_loop():
                         jpeg = buf.getvalue()
                         with latest_jpeg_lock:
                             latest_jpeg = jpeg
+                        if not first_frame_logged:
+                            first_frame_logged = True
+                            _log("First frame received — snapshot available")
                         for q in mjpeg_subscribers[:]:
                             try:
                                 q.put_nowait(jpeg)
