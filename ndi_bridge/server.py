@@ -138,19 +138,26 @@ def _ensure_avahi():
 # ---------------------------------------------------------------------------
 
 def _make_finder():
-    """Create, open, and return a new Finder. Caller holds _finder_lock."""
+    """Create, open, and return a new Finder. Caller holds _finder_lock. No long sleep here so /sources never blocks."""
     try:
         from cyndilib.finder import Finder
         f = Finder()
         f.open()
-        _log("Finder opened — waiting 3s for initial discovery...")
-        time.sleep(3)  # short wait so /sources and ingress don't hit 504
-        names = list(f.get_source_names())
-        _log(f"Initial discovery complete: {names if names else 'no sources found'}")
+        _log("Finder opened — discovery in progress (no blocking wait).")
         return f
     except Exception as e:
         _log(f"Finder init error: {e}")
         return None
+
+
+def _log_initial_discovery():
+    """Run in background: wait 3s then log current source count (avoids blocking API)."""
+    time.sleep(3)
+    with _finder_lock:
+        finder = _finder
+    if finder:
+        names = list(finder.get_source_names())
+        _log(f"Initial discovery complete: {names if names else 'no sources found'}")
 
 
 def _get_finder():
@@ -298,7 +305,7 @@ async def handle_sources(_request: web.Request) -> web.Response:
 
 
 async def handle_scan(_request: web.Request) -> web.Response:
-    """GET /scan — force fresh discovery and return sources after 3s wait."""
+    """GET /scan — force fresh discovery and return current sources (non-blocking)."""
     loop = asyncio.get_event_loop()
     names = await loop.run_in_executor(None, scan_sources_sync)
     return web.json_response({"sources": names, "scanned": True})
@@ -416,8 +423,10 @@ def main():
         # Fall back to Avahi/mDNS
         _ensure_avahi()
 
-    # Start the Finder in background
+    # Start the Finder in background (returns quickly; no long sleep)
     threading.Thread(target=_get_finder, daemon=True).start()
+    # Log discovery result after 3s in a separate thread so /sources never blocks
+    threading.Thread(target=_log_initial_discovery, daemon=True).start()
 
     # Start receiver loop
     threading.Thread(target=receiver_loop, daemon=True).start()
