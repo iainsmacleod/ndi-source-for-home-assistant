@@ -16,8 +16,10 @@ from .const import CONF_BRIDGE_URL, CONF_CAMERA_NAME, CONF_SOURCE_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# Time for bridge to switch source and receive first frame before taking snapshot
-_SOURCE_SWITCH_DELAY = 3.0
+# Time for bridge to switch source and receive first frame (NDI can be slow to connect)
+_SOURCE_SWITCH_DELAY = 5.0
+_SNAPSHOT_RETRY_DELAY = 3.0
+_SNAPSHOT_RETRIES = 5
 _MIN_JPEG_BYTES = 100
 
 
@@ -94,7 +96,7 @@ class NdiCameraEntity(Camera):
         await asyncio.sleep(_SOURCE_SWITCH_DELAY)
 
         url = f"{self._bridge_url}/snapshot.jpg"
-        for attempt in range(3):
+        for attempt in range(_SNAPSHOT_RETRIES):
             try:
                 session = async_get_clientsession(self.hass)
                 async with session.get(
@@ -110,17 +112,15 @@ class NdiCameraEntity(Camera):
                             len(data),
                         )
                     elif resp.status == 503:
-                        if attempt < 2:
-                            _LOGGER.debug(
-                                "NDI Camera %s: no frame yet (503), retry in %ss",
-                                self._attr_name,
-                                _SOURCE_SWITCH_DELAY,
-                            )
-                            await asyncio.sleep(_SOURCE_SWITCH_DELAY)
+                        if attempt < _SNAPSHOT_RETRIES - 1:
+                            await asyncio.sleep(_SNAPSHOT_RETRY_DELAY)
                             continue
                         _LOGGER.warning(
-                            "NDI Camera %s: bridge has no frame (503). Is the NDI source sending?",
+                            "NDI Camera %s: bridge still has no frame after %s tries (503). "
+                            "Check NDI Bridge app log for 'Receiver connected' and 'Frame error'. "
+                            "Is the NDI source actually sending?",
                             self._attr_name,
+                            _SNAPSHOT_RETRIES,
                         )
                     else:
                         _LOGGER.warning(
