@@ -56,12 +56,16 @@ def _configure_ndi_discovery_server(server_ip: str):
             }
         }
     }
-    # Linux: SDK loads from $HOME/.ndi/ndi-config.v1.json, or NDI_CONFIG_DIR if set
-    config_dir = "/root/.ndi"
-    os.makedirs(config_dir, exist_ok=True)
-    config_path = os.path.join(config_dir, "ndi-config.v1.json")
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
+    # Addon root FS is read-only; use /data (writable) so the file is actually created
+    config_dir = "/data/.ndi"
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "ndi-config.v1.json")
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+    except OSError as e:
+        _log(f"Failed to write NDI config to {config_dir}: {e}")
+        return
     os.environ["HOME"] = "/root"
     os.environ["NDI_CONFIG_DIR"] = config_dir  # SDK loads ndi-config.v1.json from this dir
     _log(f"NDI Discovery Server configured: {discovery_ips} → {config_path}")
