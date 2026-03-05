@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import aiohttp
@@ -14,6 +15,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_BRIDGE_URL, CONF_CAMERA_NAME, CONF_SOURCE_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Time for bridge to switch source and receive first frame before taking snapshot
+_SOURCE_SWITCH_DELAY = 2.0
 
 
 async def async_setup_entry(
@@ -50,23 +54,48 @@ class NdiCameraEntity(Camera):
         self._bridge_url = bridge_url
         self._source_name = source_name
 
+    async def _set_bridge_source(self) -> bool:
+        """Tell the bridge to stream this camera's NDI source. Required before snapshot."""
+        url = f"{self._bridge_url}/source"
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.post(
+                url,
+                json={"source_name": self._source_name},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                return resp.status == 200
+        except Exception as e:
+            _LOGGER.debug("Set bridge source failed: %s", e)
+            return False
+
     async def async_camera_image(
         self,
         width: int | None = None,
         height: int | None = None,
     ) -> bytes | None:
         """Return the latest JPEG snapshot from the bridge."""
+        # Bridge only streams one source; switch to this camera's source first
+        await self._set_bridge_source()
+        await asyncio.sleep(_SOURCE_SWITCH_DELAY)
+
         url = f"{self._bridge_url}/snapshot.jpg"
-        try:
-            session = async_get_clientsession(self.hass)
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-                _LOGGER.debug("Snapshot returned %s from %s", resp.status, url)
-        except Exception as e:
-            _LOGGER.debug("Snapshot fetch error from %s: %s", url, e)
+        for attempt in range(2):
+            try:
+                session = async_get_clientsession(self.hass)
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                    if resp.status == 503 and attempt == 0:
+                        await asyncio.sleep(_SOURCE_SWITCH_DELAY)
+                        continue
+                    if resp.status != 200:
+                        _LOGGER.debug("Snapshot returned %s from %s", resp.status, url)
+            except Exception as e:
+                _LOGGER.debug("Snapshot fetch error from %s: %s", url, e)
+            break
         return None
 
     @property
