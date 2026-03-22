@@ -51,6 +51,14 @@ The **Bridge URL** is the address of your NDI Bridge addon’s API and stream.
 
 So in most cases set **Bridge URL** to **`http://localhost:8080`**.
 
+## NDI receiver behaviour (vs OBS / DistroAV)
+
+The NDI Bridge uses [cyndilib](https://cyndilib.readthedocs.io/) (Python NDI bindings). The receiver is configured similarly to **[DistroAV](https://github.com/DistroAV/DistroAV)** (OBS NDI plugin): **highest bandwidth**, **`UYVY_BGRA`** colour mode, **`allow_video_fields=True`**, and a stable **`recv_name`** (`HA-NDI-Bridge`). That matches how `ndi-source.cpp` builds `NDIlib_recv_create_v3_t` for normal-latency sources.
+
+Video is then converted to JPEG using the frame **FourCC** / buffer size: **BGRA/BGRX** (4 bytes/pixel) or **UYVY** (2 bytes/pixel). Many webcams and low-latency paths deliver **UYVY**; treating that buffer as BGRA produces garbage or no usable image—this was a common cause of “receiver connected but no snapshot” before UYVY handling was added.
+
+If you still see no video after that, the usual cause is **network/firewall** between the NDI sender and the HA host (discovery can work while the media path is blocked).
+
 ## Requirements
 
 - Home Assistant OS or Supervised installation (for the addon)

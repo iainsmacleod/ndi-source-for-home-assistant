@@ -205,14 +205,117 @@ def scan_sources_sync() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# NDI video → JPEG (aligned with DistroAV / OBS NDI source defaults)
+# See: https://github.com/DistroAV/DistroAV — recv_create_v3 uses
+# bandwidth=highest, color_format=UYVY_BGRA (normal latency), allow_video_fields=true.
+# Many webcams deliver UYVY; assuming BGRA breaks decoding / yields no usable frame.
+# ---------------------------------------------------------------------------
+
+def _uyvy_to_rgb_bytes(data: bytes, w: int, h: int) -> bytes:
+    """Packed UYVY (4:2:2) → RGB888, same layout as NDI uses for UYVY."""
+    out = bytearray(w * h * 3)
+    o = 0
+    idx = 0
+    exp = w * h * 2
+    if len(data) < exp:
+        return b""
+    for _y in range(h):
+        for _x in range(0, w, 2):
+            u = data[idx] - 128
+            y0 = data[idx + 1]
+            v = data[idx + 2] - 128
+            y1 = data[idx + 3]
+            idx += 4
+
+            def yuv_to_rgb(y: int, u: int, v: int) -> tuple[int, int, int]:
+                r = int(y + 1.402 * v)
+                g = int(y - 0.344 * u - 0.714 * v)
+                b = int(y + 1.772 * u)
+                return max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))
+
+            r0, g0, b0 = yuv_to_rgb(y0, u, v)
+            r1, g1, b1 = yuv_to_rgb(y1, u, v)
+            out[o] = r0
+            out[o + 1] = g0
+            out[o + 2] = b0
+            o += 3
+            if _x + 1 < w:
+                out[o] = r1
+                out[o + 1] = g1
+                out[o + 2] = b1
+                o += 3
+    return bytes(out)
+
+
+def _video_frame_to_jpeg(vf, raw: bytes, quality: int = 85) -> Optional[bytes]:
+    """Convert NDI video buffer to JPEG; handles BGRA/BGRX and UYVY."""
+    from PIL import Image
+
+    w, h = vf.get_resolution()
+    buf_size = len(raw)
+    if w <= 0 or h <= 0 or buf_size <= 0:
+        return None
+
+    fourcc_name = ""
+    try:
+        fc = vf.get_fourcc()
+        fourcc_name = getattr(fc, "name", str(fc))
+    except Exception:
+        pass
+
+    try:
+        # UYVY ≈ 2 bytes/pixel; BGRA = 4 bytes/pixel (check BGRA first if buffer is large enough)
+        min_bgra = w * h * 4
+        min_uyvy = w * h * 2
+        if buf_size >= min_bgra or "BGRA" in fourcc_name or "BGRX" in fourcc_name:
+            need = min_bgra
+            if buf_size < need:
+                return None
+            img = Image.frombuffer("RGBA", (w, h), raw[:need], "raw", "BGRA", 0, 1).convert("RGB")
+        elif "UYVY" in fourcc_name or (buf_size >= min_uyvy and buf_size < min_bgra):
+            rgb = _uyvy_to_rgb_bytes(raw[:min_uyvy], w, h)
+            if not rgb:
+                return None
+            img = Image.frombytes("RGB", (w, h), rgb)
+        else:
+            _log(f"Unsupported NDI video layout: fourcc={fourcc_name!r} w={w} h={h} buf={buf_size}")
+            return None
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        return buf.getvalue()
+    except Exception as e:
+        _log(f"JPEG encode error ({fourcc_name}): {e}")
+        return None
+
+
+def _make_receiver(source=None, source_name: Optional[str] = None):
+    """Create Receiver with DistroAV-like defaults (highest bandwidth, UYVY_BGRA, named recv)."""
+    from cyndilib.receiver import Receiver
+
+    kwargs = {}
+    try:
+        from cyndilib.wrapper.ndi_recv import RecvBandwidth, RecvColorFormat
+
+        kwargs["color_format"] = RecvColorFormat.UYVY_BGRA
+        kwargs["bandwidth"] = RecvBandwidth.highest
+        kwargs["allow_video_fields"] = True
+        kwargs["recv_name"] = "HA-NDI-Bridge"
+    except Exception:
+        pass
+
+    if source is not None:
+        return Receiver(source=source, **kwargs)
+    return Receiver(source_name=source_name or "", **kwargs)
+
+
+# ---------------------------------------------------------------------------
 # Receiver loop
 # ---------------------------------------------------------------------------
 
 def receiver_loop():
     global latest_jpeg
     try:
-        from cyndilib.receiver import Receiver, ReceiveFrameType
-        from PIL import Image
+        from cyndilib.receiver import ReceiveFrameType
     except ImportError as e:
         _log(f"Import error in receiver_loop: {e}")
         return
@@ -259,13 +362,13 @@ def receiver_loop():
 
             try:
                 if src_obj is not None:
-                    recv = Receiver(source=src_obj)
+                    recv = _make_receiver(source=src_obj)
                     _log(f"Receiver connected via Finder: {src_name!r}")
                 else:
-                    # Fallback: connect by name string directly
-                    recv = Receiver(source_name=src_name)
+                    recv = _make_receiver(source_name=src_name)
                     _log(f"Receiver connecting by name (no Finder match): {src_name!r}")
                 connected_to = src_name
+                last_wait_log = time.time()
             except Exception as e:
                 _log(f"Receiver create error: {e}")
                 recv = None
@@ -286,12 +389,9 @@ def receiver_loop():
                     if buf_size > 0 and w > 0 and h > 0:
                         raw = bytearray(buf_size)
                         vf.fill_p_data(memoryview(raw))
-                        img = Image.frombuffer(
-                            "RGBA", (w, h), bytes(raw), "raw", "BGRA", 0, 1
-                        ).convert("RGB")
-                        buf = io.BytesIO()
-                        img.save(buf, format="JPEG", quality=85)
-                        jpeg = buf.getvalue()
+                        jpeg = _video_frame_to_jpeg(vf, bytes(raw), quality=85)
+                        if jpeg is None:
+                            continue
                         with latest_jpeg_lock:
                             latest_jpeg = jpeg
                         if not first_frame_logged:
